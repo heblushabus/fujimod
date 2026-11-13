@@ -472,6 +472,62 @@ unsafe fn memory_access(access: Access, address: u64, size: i32, value: i64, dat
     let cluster = unsafe { &*hook.cluster };
     cluster.record_memory(hook.core, access, address, size, value);
 }
+/// CPSR bits holding the Thumb IT-block state.
+const THUMB_IT_BITS: u32 = 0x0600_fc00;
+
+/// What a Thumb instruction needs from the board beyond native execution.
+#[derive(Debug, PartialEq, Eq)]
+enum ThumbSpecial {
+    /// Executes natively.
+    Plain,
+    WaitForInterrupt,
+    WaitForEvent,
+    SendEvent,
+    ClearExclusive,
+    /// An instruction the board models for ARM state and not for Thumb: refused rather than run with the wrong behavior.
+    Refuse(&'static str),
+}
+
+/// Classify one Thumb instruction. `word` is the little-endian fetch: the first halfword in the low half and, for a 32-bit
+/// instruction, the second halfword in the high half. A wait hint inside an IT block is conditional and is refused.
+fn classify_thumb(word: u32, size: u32, in_it_block: bool) -> ThumbSpecial {
+    let (first, second) = (word & 0xffff, word >> 16);
+    let hint = match (size, first, second) {
+        (2, 0xbf30, _) | (4, 0xf3af, 0x8003) => Some(ThumbSpecial::WaitForInterrupt),
+        (2, 0xbf20, _) | (4, 0xf3af, 0x8002) => Some(ThumbSpecial::WaitForEvent),
+        (2, 0xbf40, _) | (4, 0xf3af, 0x8004) => Some(ThumbSpecial::SendEvent),
+        _ => None,
+    };
+    if let Some(hint) = hint {
+        return if in_it_block {
+            ThumbSpecial::Refuse("Unimplemented Thumb wait hint inside an IT block")
+        } else {
+            hint
+        };
+    }
+    if size != 4 {
+        return ThumbSpecial::Plain;
+    }
+    if first == 0xf3bf && second == 0x8f2f {
+        return ThumbSpecial::ClearExclusive;
+    }
+    // LDREX/STREX and their byte, halfword and doubleword forms.
+    if matches!(first & 0xfff0, 0xe840 | 0xe850 | 0xe8c0 | 0xe8d0) {
+        return ThumbSpecial::Refuse("Unimplemented Thumb load/store-exclusive");
+    }
+    // MRC/MCR to CP15: the identity reads (MPIDR, CBAR, CCSIDR) and the PMU bank are modeled for ARM state only.
+    if first & 0xff00 == 0xee00 && second & 0x0f00 == 0x0f00 {
+        let (opc1, crn, opc2, crm) = ((first >> 5) & 7, first & 15, (second >> 5) & 7, second & 15);
+        let is_read = first & 0x10 != 0;
+        let identity = is_read
+            && matches!((opc1, crn, crm, opc2), (0, 0, 0, 5) | (4, 15, 0, 0) | (1, 0, 0, 0));
+        if identity || crn == 9 {
+            return ThumbSpecial::Refuse("Unimplemented Thumb CP15 identity or PMU access");
+        }
+    }
+    ThumbSpecial::Plain
+}
+
 fn instruction(c: &Cluster, core: usize, address: u64, size: u32) -> Result<(), String> {
     c.healthy()?;
     c.record_memory(core, Access::Fetch, address, size as i32, 0);
@@ -494,11 +550,14 @@ fn instruction(c: &Cluster, core: usize, address: u64, size: u32) -> Result<(), 
             return Ok(());
         }
     }
-    if size != 4 {
+    let thumb = c.reg(core, arm::CPSR)? & 0x20 != 0;
+    if !thumb && size != 4 {
         return Err(format!(
-            "Unimplemented ARMv7-A Thumb instrumentation at {address:#x}"
+            "ARM instruction of {size} bytes at {address:#x}"
         ));
     }
+    // A redirect resumes in the state the instruction ran in.
+    let resume = address as u32 | u32::from(thumb);
     c.due();
     c.healthy()?;
     if unsafe {
@@ -517,7 +576,7 @@ fn instruction(c: &Cluster, core: usize, address: u64, size: u32) -> Result<(), 
         }
     }
     if unsafe { (*c.state.get()).cache_dirty } {
-        return c.redirect(core, address as u32);
+        return c.redirect(core, resume);
     }
     if unsafe { (*c.state.get()).gic.next_irq(core).is_some() }
         && c.reg(core, arm::CPSR)? & 0x80 == 0
@@ -636,6 +695,39 @@ fn instruction(c: &Cluster, core: usize, address: u64, size: u32) -> Result<(), 
         }
     }
     let state = unsafe { &mut *c.state.get() };
+    if thumb {
+        let word = if size == 2 { word & 0xffff } else { word };
+        let cpsr = c.reg(core, arm::CPSR)?;
+        return match classify_thumb(word, size, cpsr & THUMB_IT_BITS != 0) {
+            ThumbSpecial::Plain => Ok(()),
+            ThumbSpecial::Refuse(reason) => Err(format!("{reason} at {address:#x}")),
+            ThumbSpecial::WaitForInterrupt => {
+                state.waiting[core] = 1;
+                c.redirect(core, resume + size)
+            }
+            ThumbSpecial::WaitForEvent => {
+                if state.events[core] {
+                    state.events[core] = false;
+                } else {
+                    state.waiting[core] = 2;
+                }
+                c.redirect(core, resume + size)
+            }
+            ThumbSpecial::SendEvent => {
+                state.events.fill(true);
+                for wait in &mut state.waiting {
+                    if *wait == 2 {
+                        *wait = 0;
+                    }
+                }
+                c.redirect(core, resume + size)
+            }
+            ThumbSpecial::ClearExclusive => {
+                state.exclusive[core] = None;
+                c.redirect(core, resume + size)
+            }
+        };
+    }
     // PMCR, PMCNTENSET/CLR and PMCCNTR follow the shared ARMv7-A PMU profile.
     if word & 0x0fef0f10 == 0x0e090f10
         && matches!(word & 15, 12 | 13)
@@ -2467,5 +2559,55 @@ impl Session {
     }
     pub fn interventions(&self) -> Vec<fujimod_emulator::board::discovery::Intervention> {
         unsafe { (*self.inner.state.get()).discovery.interventions.clone() }
+    }
+}
+
+#[cfg(test)]
+mod thumb_tests {
+    use super::{ThumbSpecial, classify_thumb};
+
+    fn wide(first: u32, second: u32) -> u32 {
+        (second << 16) | first
+    }
+
+    #[test]
+    fn wait_hints_are_modeled_in_both_widths() {
+        assert_eq!(classify_thumb(0xbf30, 2, false), ThumbSpecial::WaitForInterrupt);
+        assert_eq!(classify_thumb(0xbf20, 2, false), ThumbSpecial::WaitForEvent);
+        assert_eq!(classify_thumb(0xbf40, 2, false), ThumbSpecial::SendEvent);
+        assert_eq!(classify_thumb(wide(0xf3af, 0x8003), 4, false), ThumbSpecial::WaitForInterrupt);
+        assert_eq!(classify_thumb(wide(0xf3af, 0x8002), 4, false), ThumbSpecial::WaitForEvent);
+        assert_eq!(classify_thumb(wide(0xf3af, 0x8004), 4, false), ThumbSpecial::SendEvent);
+    }
+
+    #[test]
+    fn a_conditional_wait_hint_is_refused() {
+        assert!(matches!(classify_thumb(0xbf30, 2, true), ThumbSpecial::Refuse(_)));
+        assert!(matches!(classify_thumb(wide(0xf3af, 0x8003), 4, true), ThumbSpecial::Refuse(_)));
+    }
+
+    #[test]
+    fn clrex_is_modeled() {
+        assert_eq!(classify_thumb(wide(0xf3bf, 0x8f2f), 4, false), ThumbSpecial::ClearExclusive);
+    }
+
+    #[test]
+    fn exclusives_and_identity_reads_are_refused() {
+        // LDREX r0, [r1]; STREX r2, r0, [r1]; LDREXB r0, [r1]
+        assert!(matches!(classify_thumb(wide(0xe851, 0x0f00), 4, false), ThumbSpecial::Refuse(_)));
+        assert!(matches!(classify_thumb(wide(0xe841, 0x0200), 4, false), ThumbSpecial::Refuse(_)));
+        assert!(matches!(classify_thumb(wide(0xe8d1, 0x0f4f), 4, false), ThumbSpecial::Refuse(_)));
+        // MRC p15, 0, r0, c0, c0, 5 (MPIDR); MRC p15, 0, r0, c9, c12, 0 (PMCR)
+        assert!(matches!(classify_thumb(wide(0xee10, 0x0fb0), 4, false), ThumbSpecial::Refuse(_)));
+        assert!(matches!(classify_thumb(wide(0xee19, 0x0f1c), 4, false), ThumbSpecial::Refuse(_)));
+    }
+
+    #[test]
+    fn ordinary_instructions_execute_natively() {
+        // MOV r0, r1; BL; MRC p15, 0, r0, c1, c0, 0 (SCTLR); MCR p15, 0, r0, c7, c5, 6
+        assert_eq!(classify_thumb(0x4608, 2, false), ThumbSpecial::Plain);
+        assert_eq!(classify_thumb(wide(0xf000, 0xf800), 4, false), ThumbSpecial::Plain);
+        assert_eq!(classify_thumb(wide(0xee11, 0x0f10), 4, false), ThumbSpecial::Plain);
+        assert_eq!(classify_thumb(wide(0xee07, 0x0fd5), 4, false), ThumbSpecial::Plain);
     }
 }

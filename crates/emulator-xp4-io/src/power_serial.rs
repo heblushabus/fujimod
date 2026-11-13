@@ -85,9 +85,12 @@ impl PowerSerial {
         if inputs.iter().any(|(k, v)| (3..=6).contains(k) && *v > 1023)
             || port >= 16
             || pin >= 16
+            // Configuration registers 48..55 are writable latches whose
+            // factory contents the body reads before it writes them, so they
+            // may also be declared as initial values.
             || inputs
                 .keys()
-                .any(|k| !matches!(*k, 0..=6 | 16 | 21 | 24 | 27 | 32 | 34 | 35))
+                .any(|k| !matches!(*k, 0..=6 | 16 | 21 | 24 | 27 | 32 | 34 | 35 | 48..=55))
             || [0, 1, 2, 3, 32, 34, 35]
                 .iter()
                 .any(|n| !inputs.contains_key(n))
@@ -490,6 +493,49 @@ mod tests {
             1 << 21,
         );
         assert_eq!(resumed.exchange(8, 0, 11).unwrap(), 0);
+    }
+    #[test]
+    fn declared_configuration_registers_are_read_until_written() {
+        let pins = Pins::new([0; 16]);
+        let mut gpio = Gpio::new(BASE, pins.clone()).unwrap();
+        gpio.write(
+            &mut Cx::new(&mut Clock, 0, 0, 0),
+            BASE + 12 * 64,
+            4,
+            (1 << 21) | (1 << 5),
+        );
+        let mut peer = PowerSerial::new(
+            pins,
+            12,
+            5,
+            true,
+            false,
+            [
+                (0, 0), (1, 0), (2, 0), (3, 0), (32, 0), (34, 0), (35, 0),
+                (48, 0x07d0), (49, 0xff00),
+            ]
+            .into(),
+            54_000_000,
+            None,
+        )
+        .unwrap();
+        let read = |peer: &mut PowerSerial, register: u8| {
+            let mut value = 0;
+            for (index, byte) in [register * 4, 0, 0].into_iter().enumerate() {
+                let reply = peer.exchange(8, u16::from(byte), 0).unwrap();
+                if index > 0 {
+                    value = value << 8 | reply;
+                }
+            }
+            value
+        };
+        assert_eq!(read(&mut peer, 48), 0x07d0);
+        assert_eq!(read(&mut peer, 49), 0xff00);
+        assert_eq!(read(&mut peer, 50), 0);
+        for byte in [48 * 4 + 1, 0x12, 0x34] {
+            peer.exchange(8, byte, 0).unwrap();
+        }
+        assert_eq!(read(&mut peer, 48), 0x1234);
     }
     #[test]
     fn physical_selection_frames_latches_and_unknown_commands() {
