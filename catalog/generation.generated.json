@@ -181,6 +181,10 @@
             }
           ]
         },
+        "memory-reservations": {
+          "status": "available",
+          "errors": []
+        },
         "service": {
           "status": "unavailable",
           "errors": [
@@ -1970,6 +1974,10 @@
               "reason": "xp4: flash reader contract is not implemented"
             }
           ]
+        },
+        "memory-reservations": {
+          "status": "available",
+          "errors": []
         },
         "progress": {
           "status": "available",
@@ -7432,6 +7440,10 @@
               "reason": "xp4: flash reader contract is not implemented"
             }
           ]
+        },
+        "memory-reservations": {
+          "status": "available",
+          "errors": []
         },
         "progress": {
           "status": "unavailable",
