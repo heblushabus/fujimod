@@ -27,11 +27,11 @@
 //! to +0x734 and posts the finished run to the face task.
 //!
 //! Modeled: configuration words read back their last write; arming sets
-//! the six channel flags at once; a mode 0 run finishes `run_ticks` after
-//! its start and raises the line until +0x734 bit 0 is cleared. The image
-//! is not read and no face is detected: the result words read zero. The
-//! run time and the arming latency are not measured. Runs in other modes
-//! (the driver also starts mode 4 and polls +0x734) are refused.
+//! the six channel flags at once; a mode 0 or mode 4 run finishes
+//! `run_ticks` after its start, clears `+0x04` and raises the line until
+//! `+0x734` bit 0 is cleared. The image is not read and no face is
+//! detected: the result words read zero. The run time and the arming
+//! latency are not measured. Runs in other modes (1..=3) are refused.
 use fujimod_emulator_devices::{Cx, Device};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -101,7 +101,7 @@ impl FaceDetector {
         if state.words.iter().any(|(o, v)| !configuration(*o) || *v == 0)
             || state.mode & !MODE_BITS != 0
             || state.channels & !CHANNELS != 0
-            || state.due.is_some() && (state.finished || state.mode & 7 != 0)
+            || state.due.is_some() && (state.finished || !matches!(state.mode & 7, 0 | 4))
         {
             return Err("Invalid XP4 face detector checkpoint".into());
         }
@@ -153,7 +153,7 @@ impl Device for FaceDetector {
             START if value <= 1 => {
                 let start = value == 1;
                 if start && !self.state.start {
-                    if self.state.mode & 7 != 0 {
+                    if !matches!(self.state.mode & 7, 0 | 4) {
                         return cx.fail(format!(
                             "XP4 face detector run in mode {} is not modeled",
                             self.state.mode & 7
@@ -198,6 +198,7 @@ impl Device for FaceDetector {
             return;
         }
         self.state.due = None;
+        self.state.start = false;
         self.state.runs += 1;
         self.state.finished = true;
         cx.set_irq(self.irq, true);
@@ -291,6 +292,13 @@ mod tests {
         assert!(refused(&mut d, &mut h, CONTROL, Some(1)));
         assert!(refused(&mut d, &mut h, MODE, Some(5)));
         write(&mut d, &mut h, BASE + MODE, 4);
+        write(&mut d, &mut h, BASE + START, 1);
+        assert_eq!(d.next_deadline(0), Some(10));
+        advance(&mut d, &mut h, 10);
+        assert_eq!(read(&mut d, &mut h, BASE + FINISHED), 1);
+        assert_eq!(read(&mut d, &mut h, BASE + START), 0);
+        write(&mut d, &mut h, BASE + FINISHED_CLEAR, 1);
+        write(&mut d, &mut h, BASE + MODE, 1);
         assert!(refused(&mut d, &mut h, START, Some(1)));
         assert!(d.restore(&serde_json::json!({"words": {"2048": 1}, "mode": 0, "start": false,
             "armed": false, "channels": 0, "finished": false, "runs": 0})).is_err());
