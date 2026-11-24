@@ -1332,6 +1332,41 @@
               "basis": "X-T3 5.11 resets the unit by writing 0 to +0x000 and waits for bit 0 to read 1. Other words read back their last write; nothing else in this block is modeled."
             },
             {
+              "base": 4294410240,
+              "size": 4096,
+              "idle_bits": [],
+              "commands": [
+                {
+                  "word": 28,
+                  "value": 1,
+                  "status": 28,
+                  "mask": 1,
+                  "state": 0
+                }
+              ],
+              "basis": "X-T3 5.11 peripheral block at 0xfff78000: enabling the unit writes 1 to +0x01c and polls until it reads 0. The request is modeled as completing at once so bit 0 clears right after the write; hardware timing is not measured. Other words read back their last write."
+            },
+            {
+              "base": 4294606848,
+              "size": 4096,
+              "idle_bits": [
+                {
+                  "offset": 0,
+                  "mask": 1
+                }
+              ],
+              "job": {
+                "start": {
+                  "offset": 4,
+                  "mask": 1
+                },
+                "irq_route": 144,
+                "ticks": 10
+              },
+              "audio_converter": true,
+              "basis": "X-T3 5.11 audio format converter at 0xfffa8000, used by movie recording and playback: it reads +0x000 bit 0 as idle, starts a conversion with +0x004 bit 0 and takes completion on interrupt line 144. The conversion packs the serial audio port's 32-bit slots into 24-bit movie samples (or unpacks them for playback). The 10-tick conversion time is not measured; other words read back their last write."
+            },
+            {
               "base": 4294619136,
               "size": 4096,
               "idle_bits": [

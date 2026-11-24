@@ -2405,6 +2405,10 @@
       "additionalProperties": false,
       "description": "X-Processor Pro register block with no work in flight.",
       "properties": {
+        "audio_converter": {
+          "description": "The block's job converts audio samples between the serial audio port's\nslots and the movie's packed samples. Needs `job`.",
+          "type": "boolean"
+        },
         "base": {
           "description": "Declared base.",
           "format": "uint64",

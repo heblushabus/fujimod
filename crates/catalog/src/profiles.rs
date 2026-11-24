@@ -1525,6 +1525,10 @@ pub struct RegisterBlock {
     /// Command writes that set a field of a status word.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<RegisterBlockCommand>,
+    /// The block's job converts audio samples between the serial audio port's
+    /// slots and the movie's packed samples. Needs `job`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub audio_converter: bool,
     /// Declared size.
     pub size: u64,
 }

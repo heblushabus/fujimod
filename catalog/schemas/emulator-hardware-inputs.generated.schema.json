@@ -378,6 +378,17 @@
           ],
           "description": "Declared XP4 still data path: the scene the still read-out carries\nand the RAW the still engines develop."
         },
+        "xp4_storage_dma_audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResetXp4StorageDmaAudio"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Declared XP4 storage DMA audio channels of the movie recording path."
+        },
         "zone_statistics": {
           "anyOf": [
             {
@@ -3494,6 +3505,49 @@
         "raw_address",
         "raw_pitch",
         "raw_site"
+      ],
+      "type": "object"
+    },
+    "ResetXp4StorageDmaAudio": {
+      "additionalProperties": false,
+      "description": "Audio channels of the XP4 storage DMA: paced silent receive FIFOs and\nlinked descriptor lists, as the movie recording path uses them.",
+      "properties": {
+        "basis": {
+          "description": "Declared basis.",
+          "type": "string"
+        },
+        "bytes_per_second": {
+          "description": "Bytes per second a paced channel moves.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "channels": {
+          "description": "DMA channels that carry audio.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "irq_at_end": {
+          "description": "The end of a descriptor list raises the channel interrupt; earlier\nblocks do not.",
+          "type": "boolean"
+        },
+        "ticks_per_second": {
+          "description": "Device ticks per second.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "basis",
+        "bytes_per_second",
+        "channels",
+        "irq_at_end",
+        "ticks_per_second"
       ],
       "type": "object"
     },

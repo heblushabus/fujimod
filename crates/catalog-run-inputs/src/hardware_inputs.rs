@@ -1323,6 +1323,26 @@ pub struct StatisticsBuffer {
     pub light_words: Vec<u32>,
 }
 
+/// Audio channels of the XP4 storage DMA: paced silent receive FIFOs and
+/// linked descriptor lists, as the movie recording path uses them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", schemars(rename = "ResetXp4StorageDmaAudio"))]
+pub struct Xp4StorageDmaAudio {
+    /// Declared basis.
+    pub basis: String,
+    /// Bytes per second a paced channel moves.
+    pub bytes_per_second: u64,
+    /// DMA channels that carry audio.
+    pub channels: Vec<u64>,
+    /// The end of a descriptor list raises the channel interrupt; earlier
+    /// blocks do not.
+    pub irq_at_end: bool,
+    /// Device ticks per second.
+    pub ticks_per_second: u64,
+}
+
 /// Declared hardware reset facts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1378,6 +1398,9 @@ pub struct HardwareReset {
     /// and the RAW the still engines develop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub xp4_still_data: Option<Xp4StillData>,
+    /// Declared XP4 storage DMA audio channels of the movie recording path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xp4_storage_dma_audio: Option<Xp4StorageDmaAudio>,
     /// Declared calibration records in the body's flash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flash_calibration: Option<FlashCalibration>,

@@ -3058,6 +3058,7 @@ class HardwareRaster(TypedDict, total=False):
 
 
 class HardwareRegisterBlock(TypedDict, total=False):
+    audio_converter: NotRequired[bool]
     base: Required[int]
     basis: Required[str]
     commands: NotRequired[list[HardwareRegisterBlockCommand]]

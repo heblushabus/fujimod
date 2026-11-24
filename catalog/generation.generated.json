@@ -7433,13 +7433,8 @@
           ]
         },
         "flash": {
-          "status": "unavailable",
-          "errors": [
-            {
-              "locator": "flash_error",
-              "reason": "xp4: flash reader contract is not implemented"
-            }
-          ]
+          "status": "available",
+          "errors": []
         },
         "memory-reservations": {
           "status": "available",

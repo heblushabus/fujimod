@@ -191,6 +191,13 @@
         1
       ]
     },
+    "xp4_storage_dma_audio": {
+      "basis": "X-T3 5.11 movie recording drives storage DMA channels 4, 7 and 8 for audio; channel 4 reads the serial audio port's receive FIFO through linked descriptor lists, and the roles of the other two are not distinguished here. Each declared channel moves 384000 bytes per second at the 54 MHz device clock (two channels of 32-bit slots at 48 kHz; the rate is declared, not measured), the end of a descriptor list raises the channel interrupt, and the microphone delivers silence.",
+      "channels": [4, 7, 8],
+      "bytes_per_second": 384000,
+      "ticks_per_second": 54000000,
+      "irq_at_end": true
+    },
     "usb_cable": {
       "basis": "No VBUS input is known for the X-T3: its key table has no USB row and the stock USB task reads the condition register at 0xfff4a300, which follows the cable. Bank 15 pin 15 is a declared pin no stock key row reads; a host negotiates high speed.",
       "vbus_bank": 15,
